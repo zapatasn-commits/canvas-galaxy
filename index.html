@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Canvas Galaxy — Stars</title>
+  <style>
+    /* Fill the whole viewport with the canvas */
+    html,body { height:100%; margin:0; background:#000; font-family:system-ui, sans-serif; }
+    #canvasWrap { display:flex; align-items:center; justify-content:center; height:100%; }
+    canvas { border-radius:8px; box-shadow: 0 6px 30px rgba(0,0,0,0.6); background: radial-gradient(ellipse at center, rgba(10,10,20,1) 0%, rgba(0,0,0,1) 70%); }
+    .ui { position: fixed; left:12px; top:12px; color:#ddd; font-size:14px; user-select:none; }
+    .ui small { opacity:0.7; display:block; margin-top:6px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    Canvas Galaxy — Stars
+    <small>Click canvas to regenerate. Press Space to toggle twinkle animation.</small>
+  </div>
+  <div id="canvasWrap">
+    <canvas id="myCanvas" width="800" height="600"></canvas>
+  </div>
+
+  <script>
+  // ======= CONFIG =======
+  const CONFIG = {
+    starCount: 250,         // how many stars
+    minRadius: 0.3,         // smallest star radius
+    maxRadius: 1.8,         // largest star radius
+    colorRange: [200, 60],  // hue range tweak for slight color variance (HSL)
+    twinkle: true,          // start with twinkle enabled
+    twinkleSpeed: 0.02      // how fast twinkle changes
+  };
+
+  // ======= SETUP =======
+  const canvas = document.getElementById('myCanvas');
+  const ctx = canvas.getContext('2d');
+  let W = canvas.width;
+  let H = canvas.height;
+  let stars = [];
+  let lastTime = 0;
+
+  // handle high DPI (sharp on retina)
+  function fixDPI() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  fixDPI();
+
+  // ======= STAR FACTORY =======
+  function makeStar() {
+    // Random position within canvas
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    // Radius biased toward smaller values
+    const r = CONFIG.minRadius + Math.pow(Math.random(), 2) * (CONFIG.maxRadius - CONFIG.minRadius);
+    // Hue slightly varied so some stars are pale blue, some warm
+    const hue = CONFIG.colorRange[0] + Math.random() * (CONFIG.colorRange[1] - CONFIG.colorRange[0]);
+    // initial alpha (brightness)
+    const a = 0.6 + Math.random() * 0.5;
+    // twinkle phase offset
+    const phase = Math.random() * Math.PI * 2;
+    // optional small drift for parallax effect
+    const drift = (Math.random() - 0.5) * 0.02;
+    return { x,y,r,hue,a,phase,drift };
+  }
+
+  // create initial stars
+  function populateStars(n) {
+    stars = [];
+    for (let i=0;i<n;i++) stars.push(makeStar());
+  }
+  populateStars(CONFIG.starCount);
+
+  // ======= DRAWING =======
+  // draw one star (soft radial glow)
+  function drawStar(star, time) {
+    const { x, y, r, hue, phase } = star;
+    // twinkle factor: small periodic change in brightness
+    let tw = 1;
+    if (CONFIG.twinkle) {
+      tw = 0.7 + 0.3 * (0.5 + 0.5 * Math.sin(time * CONFIG.twinkleSpeed + phase));
+    }
+    // Create a radial gradient — bright center to transparent edge
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 6);
+    // center color: bright with twinkle
+    grad.addColorStop(0, `hsla(${hue}, 90%, ${70 * tw}%, ${0.95 * tw})`);
+    grad.addColorStop(0.15, `hsla(${hue}, 90%, ${60 * tw}%, ${0.6 * tw})`);
+    grad.addColorStop(0.4, `hsla(${hue}, 90%, ${40 * tw}%, ${0.22 * tw})`);
+    grad.addColorStop(1, `rgba(0,0,0,0)`);
+
+    ctx.beginPath();
+    ctx.fillStyle = grad;
+    ctx.arc(x, y, r * 6, 0, Math.PI*2);
+    ctx.fill();
+
+    // Small sharp core
+    ctx.beginPath();
+    ctx.fillStyle = `hsla(${hue}, 80%, ${85 * tw}%, ${1 * tw})`;
+    ctx.arc(x, y, Math.max(0.5, r), 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // frame render
+  function render(timestamp) {
+    const t = timestamp / 1000; // seconds
+    // fade background slightly (so any motion leaves no trails)
+    ctx.clearRect(0, 0, W, H);
+
+    // soft nebula layer made with noise-ish lines (subtle)
+    drawNebula(t);
+
+    // draw stars
+    for (let s of stars) {
+      // small parallax/drift update (so stars slowly move)
+      s.x += s.drift * 0.3;
+      if (s.x < -10) s.x = W + 10;
+      if (s.x > W + 10) s.x = -10;
+      drawStar(s, t);
+    }
+
+    lastTime = timestamp;
+    requestAnimationFrame(render);
+  }
+
+  // simple nebula: many semi-transparent bezier lines to add texture
+  function drawNebula(time) {
+    // make a tiny layered noise effect
+    for (let layer=0; layer<3; layer++) {
+      ctx.beginPath();
+      const alpha = 0.02 + layer * 0.02;
+      ctx.fillStyle = `rgba(${10 + 30*layer}, ${10 + 20*layer}, ${30 + 30*layer}, ${alpha})`;
+      // draw many thin sine-wave-like shapes
+      const step = 40 + layer*30;
+      for (let x= -50; x <= W + 50; x += step) {
+        const y = H * (0.3 + 0.15 * layer) + Math.sin((x/80) + time * (0.1+layer*0.02)) * (40 + layer*30);
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, 40 + layer*30, 0, Math.PI*2);
+      }
+      ctx.fill();
+    }
+  }
+
+  // start animation
+  requestAnimationFrame(render);
+
+  // ======= INTERACTIONS =======
+  // regenerate stars on click
+  canvas.addEventListener('click', () => populateStars(CONFIG.starCount));
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      CONFIG.twinkle = !CONFIG.twinkle;
+      e.preventDefault();
+    } else if (e.key === '+' || e.key === '=') {
+      CONFIG.starCount = Math.min(1200, CONFIG.starCount + 50);
+      populateStars(CONFIG.starCount);
+    } else if (e.key === '-') {
+      CONFIG.starCount = Math.max(10, CONFIG.starCount - 50);
+      populateStars(CONFIG.starCount);
+    }
+  });
+
+  // responsive canvas (keeps drawing area size consistent)
+  function resize() {
+    // fill most of viewport but keep aspect ratio
+    const maxW = Math.min(window.innerWidth - 40, 1000);
+    const maxH = Math.min(window.innerHeight - 40, 800);
+    W = Math.floor(maxW);
+    H = Math.floor(maxH);
+    canvas.width = W;
+    canvas.height = H;
+    fixDPI();
+    // reposition stars within new bounds (conservative: regenerate)
+    populateStars(CONFIG.starCount);
+  }
+  window.addEventListener('resize', resize);
+  // initial call to make sure canvas matches CSS size
+  resize();
+
+  </script>
+</body>
+</html>
